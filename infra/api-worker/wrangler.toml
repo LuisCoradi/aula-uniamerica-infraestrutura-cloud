@@ -1,0 +1,21 @@
+name = "trabaidafacul-api"
+main = "src/index.js"
+compatibility_date = "2026-09-07"
+
+# ---------------------------------------------------------------------------
+# SEGURANCA: o Back-end NAO e exposto a Internet.
+#   workers_dev = false  -> nao gera a URL trabaidafacul-api.<subdominio>.workers.dev
+#   (nao ha bloco "routes") -> nenhum hostname do dominio aponta para este Worker
+# A unica forma de invoca-lo e o Service Binding declarado no proxy-worker.
+# ---------------------------------------------------------------------------
+workers_dev = false
+
+# Banco de dados serverless. O acesso e por binding, nao por rede:
+# o D1 nao possui host, porta nem string de conexao publica.
+[[d1_databases]]
+binding = "DB"
+database_name = "trabaidafacul-db"
+database_id = "7f777743-c57d-4ad5-80c8-19adbf8befab"   # sai do comando: wrangler d1 create
+
+[observability]
+enabled = true

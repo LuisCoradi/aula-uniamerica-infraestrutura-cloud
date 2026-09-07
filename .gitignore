@@ -1,1 +1,3 @@
 data
+# Local Netlify folder
+.netlify

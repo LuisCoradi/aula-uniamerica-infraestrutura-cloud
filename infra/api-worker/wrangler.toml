@@ -15,7 +15,12 @@ workers_dev = false
 [[d1_databases]]
 binding = "DB"
 database_name = "trabaidafacul-db"
-database_id = "7f777743-c57d-4ad5-80c8-19adbf8befab"   # sai do comando: wrangler d1 create
+database_id = "COLE_AQUI_O_DATABASE_ID"   # sai do comando: wrangler d1 create
+
+# Observabilidade (entrega 2): mesmo destino de logs do proxy.
+#   wrangler secret put LOKI_USER
+#   wrangler secret put LOKI_TOKEN
+# LOKI_URL = "https://logs-prod-XXX.grafana.net/loki/api/v1/push"
 
 [observability]
 enabled = true

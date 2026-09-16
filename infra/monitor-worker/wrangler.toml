@@ -1,0 +1,20 @@
+name = "trabaidafacul-monitor"
+main = "src/index.js"
+compatibility_date = "2026-09-07"
+
+# Sonda interna: nao precisa (nem deve) ter endereco publico.
+workers_dev = false
+
+# Cron Trigger: uma checagem por minuto. Plano free permite ate 5 crons.
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+ALVO_FRONT = "https://app.trabaidafacul.site/"
+ALVO_API = "https://api.trabaidafacul.site/health"
+# LOKI_URL entra como var; LOKI_USER e LOKI_TOKEN entram como secret:
+#   wrangler secret put LOKI_USER
+#   wrangler secret put LOKI_TOKEN
+
+[observability]
+enabled = true

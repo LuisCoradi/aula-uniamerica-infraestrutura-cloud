@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arquitetura Cloudflare — trabaidafacul.site</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0A1120; --bg2:#101d33; --panel:#141f33; --line:#2a3b57;
+    --text:#e8edf5; --text-dim:#8a97ac;
+    --accent:#f2a93b;
+    --blue:#4fa3f7; --green:#34d399; --teal:#2dd4bf; --coral:#fb7185; --gray:#7c8aa3;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; color:var(--text);
+    font-family:'Inter',system-ui,sans-serif;
+    background:
+      radial-gradient(1200px 500px at 15% -10%, var(--bg2), transparent 60%),
+      var(--bg);
+  }
+  .page{max-width:1080px; margin:0 auto; padding:44px 22px 90px;}
+  .eyebrow{
+    font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--accent); margin:0 0 8px;
+  }
+  h1{
+    font-family:'JetBrains Mono',monospace; font-size:22px; font-weight:700;
+    margin:0 0 8px; letter-spacing:-.01em;
+  }
+  .subtitle{color:var(--text-dim); font-size:14.5px; margin:0 0 28px; max-width:62ch; line-height:1.5;}
+  .stage{
+    background:var(--panel); border:1px solid var(--line); border-radius:18px;
+    padding:18px; box-shadow:0 24px 70px rgba(0,0,0,.4);
+  }
+  svg{width:100%; height:auto; display:block; overflow:visible;}
+
+  .node rect{ transition:fill-opacity .15s, stroke-width .15s, filter .15s; cursor:pointer; }
+  .node text{ pointer-events:none; user-select:none; }
+  .node .th{ font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; fill:var(--text); }
+  .node .ts{ font-family:'Inter',sans-serif; font-size:11.5px; fill:var(--text-dim); }
+  .node .tm{ font-family:'JetBrains Mono',monospace; font-size:10.5px; fill:var(--text-dim); }
+  .node:hover rect, .node.kbd-focus rect{ fill-opacity:.28; stroke-width:2.2; filter:drop-shadow(0 0 8px currentColor); }
+
+  .c-blue rect{ fill:var(--blue); fill-opacity:.12; stroke:var(--blue); stroke-width:1.4; color:var(--blue); }
+  .c-green rect{ fill:var(--green); fill-opacity:.12; stroke:var(--green); stroke-width:1.4; color:var(--green); }
+  .c-teal rect{ fill:var(--teal); fill-opacity:.12; stroke:var(--teal); stroke-width:1.4; color:var(--teal); }
+  .c-coral rect{ fill:var(--coral); fill-opacity:.10; stroke:var(--coral); stroke-width:1.4; color:var(--coral); }
+  .c-gray rect{ fill:var(--gray); fill-opacity:.10; stroke:var(--gray); stroke-width:1.4; color:var(--gray); }
+
+  .edge{ cursor:pointer; }
+  .edge .hit{ stroke:transparent; stroke-width:18; fill:none; }
+  .edge .line{ stroke:var(--text-dim); stroke-width:1.6; fill:none; transition:stroke .15s, stroke-width .15s; }
+  .edge:hover .line, .edge.kbd-focus .line{ stroke:var(--accent); stroke-width:2.4; }
+  .edge .lbl{ font-family:'JetBrains Mono',monospace; font-size:10px; fill:var(--text-dim); pointer-events:none; }
+
+  .edge.internal .line{ stroke-dasharray:3 4; }
+  .edge.blocked .line{ stroke:var(--coral); stroke-dasharray:7 5; }
+  .edge.blocked:hover .line, .edge.blocked.kbd-focus .line{ stroke:var(--coral); stroke-width:2.6; }
+  .edge.blocked .lbl{ fill:var(--coral); }
+  .bar{ stroke:var(--coral); stroke-width:2.8; stroke-linecap:round; pointer-events:none; }
+
+  .band{ font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600;
+         letter-spacing:.12em; fill:var(--text-dim); }
+  .arrowhead-mk{ fill:none; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+  .pulse{ opacity:0; pointer-events:none; }
+
+  .legend{ display:flex; flex-wrap:wrap; gap:10px 26px; margin:18px 4px 0; }
+  .legend div{ display:flex; align-items:center; gap:9px; font-size:12.5px; color:var(--text-dim); }
+  .sw{ width:11px; height:11px; border-radius:3px; flex:none; }
+  .swl{ width:24px; height:0; border-top:2px solid; flex:none; }
+
+  .hint{ font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dim); margin:16px 4px 0; }
+
+  .backdrop{
+    position:fixed; inset:0; background:rgba(5,9,16,.55);
+    opacity:0; pointer-events:none; transition:opacity .25s; z-index:40;
+  }
+  .backdrop.open{ opacity:1; pointer-events:auto; }
+
+  .drawer{
+    position:fixed; top:0; right:0; height:100vh; width:400px; max-width:92vw;
+    background:var(--panel); border-left:1px solid var(--line);
+    box-shadow:-24px 0 50px rgba(0,0,0,.45);
+    transform:translateX(105%); transition:transform .28s ease;
+    padding:26px 24px; overflow-y:auto; z-index:50;
+  }
+  .drawer.open{ transform:translateX(0); }
+  .drawer-close{
+    position:absolute; top:16px; right:16px; width:32px; height:32px;
+    border-radius:8px; border:1px solid var(--line); background:transparent;
+    color:var(--text-dim); font-size:18px; line-height:1; cursor:pointer;
+  }
+  .drawer-close:hover{ color:var(--text); border-color:var(--accent); }
+  .drawer-kind{
+    display:flex; align-items:center; gap:8px;
+    font-family:'JetBrains Mono',monospace; font-size:11.5px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--text-dim); margin:4px 0 12px;
+  }
+  .drawer-dot{ width:9px; height:9px; border-radius:2px; flex:none; }
+  .drawer h2{
+    font-family:'JetBrains Mono',monospace; font-size:18px; margin:0 0 14px; line-height:1.35;
+  }
+  .drawer p{ font-size:14.5px; line-height:1.65; color:var(--text-dim); margin:0 0 14px; }
+  .drawer .facts{
+    margin:18px 0 0; padding:14px 0 0; border-top:1px solid var(--line);
+    font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.9; color:var(--text-dim);
+  }
+  .drawer .facts b{ color:var(--text); font-weight:600; }
+
+  @media (max-width:640px){
+    .drawer{
+      top:auto; bottom:0; right:0; left:0; width:100%; max-width:100%;
+      height:auto; max-height:78vh; border-left:none;
+      border-top:1px solid var(--line); border-radius:18px 18px 0 0;
+      transform:translateY(105%);
+    }
+    .drawer.open{ transform:translateY(0); }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <p class="eyebrow">UniAmérica · Infraestrutura Cloud</p>
+  <h1>trabaidafacul.site — arquitetura interativa</h1>
+  <p class="subtitle">Clique (ou navegue com Tab + Enter) em qualquer bloco ou seta para ver o que aquilo faz, em qual porta, e por que está ali. As setas vermelhas são os acessos que não existem.</p>
+
+  <div class="stage">
+    <svg viewBox="0 0 990 890" role="img" aria-label="Diagrama interativo da arquitetura serverless na Cloudflare">
+
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path class="arrowhead-mk" stroke="var(--text-dim)" d="M2 1L8 5L2 9"/>
+        </marker>
+        <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path class="arrowhead-mk" stroke="var(--coral)" d="M2 1L8 5L2 9"/>
+        </marker>
+      </defs>
+
+      <!-- ===== CONTÊINERES (desenhados primeiro, ficam por baixo) ===== -->
+      <g class="node c-gray" data-id="cloudflare" tabindex="0" role="button" aria-label="Componente: Rede Cloudflare">
+        <rect x="30" y="92" width="930" height="636" rx="20"/>
+        <text class="th" x="52" y="120">Rede Cloudflare</text>
+      </g>
+
+      <g class="node c-blue" data-id="proxy" tabindex="0" role="button" aria-label="Componente: Proxy reverso">
+        <rect x="250" y="252" width="410" height="348" rx="14"/>
+        <text class="th" x="270" y="278">Proxy reverso · Worker</text>
+      </g>
+
+      <g class="node c-green" data-id="zona-privada" tabindex="0" role="button" aria-label="Componente: Zona privada">
+        <rect x="690" y="456" width="260" height="252" rx="14" stroke-dasharray="7 5"/>
+        <text class="th" x="706" y="482">Zona privada</text>
+        <text class="tm" x="706" y="500">sem endereço na Internet</text>
+      </g>
+
+      <!-- ================= ARESTAS ================= -->
+      <g class="edge" data-id="e-usuario-dns" tabindex="0" role="button" aria-label="Conexão: Usuário para DNS">
+        <line class="hit" x1="495" y1="64" x2="495" y2="146"/>
+        <line class="line" x1="495" y1="64" x2="495" y2="146" marker-end="url(#arrow)"/>
+        <text class="lbl" x="507" y="110">53/UDP</text>
+      </g>
+
+      <g class="edge" data-id="e-dns-app" tabindex="0" role="button" aria-label="Conexão: DNS para rota do front-end">
+        <line class="hit" x1="495" y1="214" x2="470" y2="292"/>
+        <line class="line" x1="495" y1="214" x2="470" y2="292" marker-end="url(#arrow)"/>
+        <text class="lbl" x="500" y="258">443/TCP</text>
+      </g>
+
+      <g class="edge" data-id="e-app-o1" tabindex="0" role="button" aria-label="Conexão: proxy para Origem 1">
+        <line class="hit" x1="642" y1="330" x2="694" y2="323"/>
+        <line class="line" x1="642" y1="330" x2="694" y2="323" marker-end="url(#arrow)"/>
+      </g>
+
+      <g class="edge" data-id="e-app-o2" tabindex="0" role="button" aria-label="Conexão: proxy para Origem 2">
+        <line class="hit" x1="642" y1="360" x2="694" y2="402"/>
+        <line class="line" x1="642" y1="360" x2="694" y2="402" marker-end="url(#arrow)"/>
+      </g>
+
+      <g class="edge" data-id="e-front-api" tabindex="0" role="button" aria-label="Conexão: front-end no navegador para a API">
+        <polyline class="hit" points="395,40 210,40 210,487 264,487"/>
+        <polyline class="line" points="395,40 210,40 210,487 264,487" marker-end="url(#arrow)"/>
+        <text class="lbl" x="222" y="232">443/TCP · chamada da API</text>
+      </g>
+
+      <g class="edge internal" data-id="e-api-backend" tabindex="0" role="button" aria-label="Conexão: proxy para o back-end">
+        <line class="hit" x1="642" y1="500" x2="700" y2="546"/>
+        <line class="line" x1="642" y1="500" x2="700" y2="546" marker-end="url(#arrow)"/>
+        <text class="lbl" x="596" y="582">binding</text>
+      </g>
+
+      <g class="edge internal" data-id="e-backend-d1" tabindex="0" role="button" aria-label="Conexão: back-end para o banco">
+        <line class="hit" x1="820" y1="590" x2="820" y2="610"/>
+        <line class="line" x1="820" y1="590" x2="820" y2="610" marker-end="url(#arrow)"/>
+        <text class="lbl" x="832" y="606">binding</text>
+      </g>
+
+      <g class="edge blocked" data-id="e-bloqueado" tabindex="0" role="button" aria-label="Fluxo bloqueado: Internet para o back-end e o banco">
+        <line class="hit" x1="312" y1="818" x2="652" y2="818"/>
+        <line class="line" x1="312" y1="818" x2="652" y2="818" marker-end="url(#arrow-red)"/>
+        <line class="bar" x1="472" y1="806" x2="492" y2="830"/>
+        <line class="bar" x1="492" y1="806" x2="472" y2="830"/>
+        <text class="lbl" x="482" y="796" text-anchor="middle">sem hostname · portas 3306 · 5432 · 27017 fechadas</text>
+      </g>
+
+      <!-- ================= NÓS ================= -->
+      <g class="node c-gray" data-id="usuario" tabindex="0" role="button" aria-label="Componente: Usuário">
+        <rect x="395" y="16" width="200" height="48" rx="8"/>
+        <text class="th" x="495" y="40" text-anchor="middle" dominant-baseline="central">Usuário</text>
+      </g>
+
+      <g class="node c-blue" data-id="dns" tabindex="0" role="button" aria-label="Componente: DNS Cloudflare">
+        <rect x="375" y="150" width="240" height="64" rx="8"/>
+        <text class="th" x="495" y="172" text-anchor="middle" dominant-baseline="central">DNS Cloudflare</text>
+        <text class="tm" x="495" y="193" text-anchor="middle" dominant-baseline="central">zona trabaidafacul.site</text>
+      </g>
+
+      <g class="node c-blue" data-id="rota-app" tabindex="0" role="button" aria-label="Componente: rota do front-end">
+        <rect x="270" y="298" width="370" height="92" rx="8"/>
+        <text class="th" x="455" y="320" text-anchor="middle" dominant-baseline="central">app.trabaidafacul.site</text>
+        <text class="ts" x="455" y="344" text-anchor="middle" dominant-baseline="central">afinidade por IP do visitante</text>
+        <text class="ts" x="455" y="362" text-anchor="middle" dominant-baseline="central">failover em erro ou timeout</text>
+        <text class="tm" x="455" y="380" text-anchor="middle" dominant-baseline="central">443/TCP · TLS 1.2+ · HSTS</text>
+      </g>
+
+      <g class="node c-blue" data-id="rota-api" tabindex="0" role="button" aria-label="Componente: rota da API">
+        <rect x="270" y="412" width="370" height="150" rx="8"/>
+        <text class="th" x="455" y="436" text-anchor="middle" dominant-baseline="central">api.trabaidafacul.site</text>
+        <text class="ts" x="455" y="462" text-anchor="middle" dominant-baseline="central">CORS: só o front oficial</text>
+        <text class="ts" x="455" y="482" text-anchor="middle" dominant-baseline="central">allowlist de métodos</text>
+        <text class="ts" x="455" y="502" text-anchor="middle" dominant-baseline="central">allowlist de rotas</text>
+        <text class="ts" x="455" y="522" text-anchor="middle" dominant-baseline="central">rate limit 100 req/min</text>
+        <text class="tm" x="455" y="544" text-anchor="middle" dominant-baseline="central">443/TCP · HTTPS · WAF</text>
+      </g>
+
+      <g class="node c-teal" data-id="origem1" tabindex="0" role="button" aria-label="Componente: Origem 1">
+        <rect x="700" y="292" width="250" height="62" rx="8"/>
+        <text class="th" x="825" y="314" text-anchor="middle" dominant-baseline="central">Origem 1 · Pages</text>
+        <text class="tm" x="825" y="336" text-anchor="middle" dominant-baseline="central">trabaidafacul.pages.dev</text>
+      </g>
+
+      <g class="node c-teal" data-id="origem2" tabindex="0" role="button" aria-label="Componente: Origem 2">
+        <rect x="700" y="374" width="250" height="62" rx="8"/>
+        <text class="th" x="825" y="396" text-anchor="middle" dominant-baseline="central">Origem 2 · Pages</text>
+        <text class="tm" x="825" y="418" text-anchor="middle" dominant-baseline="central">trabaidafacul-b.pages.dev</text>
+      </g>
+
+      <g class="node c-green" data-id="backend" tabindex="0" role="button" aria-label="Componente: Back-end Worker">
+        <rect x="706" y="516" width="228" height="72" rx="8"/>
+        <text class="th" x="820" y="542" text-anchor="middle" dominant-baseline="central">Back-end · Worker</text>
+        <text class="tm" x="820" y="564" text-anchor="middle" dominant-baseline="central">workers.dev desativado</text>
+      </g>
+
+      <g class="node c-green" data-id="d1" tabindex="0" role="button" aria-label="Componente: Banco D1">
+        <rect x="706" y="616" width="228" height="72" rx="8"/>
+        <text class="th" x="820" y="642" text-anchor="middle" dominant-baseline="central">Banco · D1</text>
+        <text class="tm" x="820" y="664" text-anchor="middle" dominant-baseline="central">SQLite serverless</text>
+      </g>
+
+      <text class="band" x="30" y="762">FLUXOS BLOQUEADOS</text>
+
+      <g class="node c-gray" data-id="internet" tabindex="0" role="button" aria-label="Componente: Internet">
+        <rect x="30" y="782" width="280" height="72" rx="8"/>
+        <text class="th" x="170" y="808" text-anchor="middle" dominant-baseline="central">Internet</text>
+        <text class="tm" x="170" y="830" text-anchor="middle" dominant-baseline="central">curl · psql · mongosh · nmap</text>
+      </g>
+
+      <g class="node c-coral" data-id="alvo-bloqueado" tabindex="0" role="button" aria-label="Componente: alvo inalcançável">
+        <rect x="660" y="782" width="300" height="72" rx="8" stroke-dasharray="6 4"/>
+        <text class="th" x="810" y="808" text-anchor="middle" dominant-baseline="central">Back-end e Banco</text>
+        <text class="tm" x="810" y="830" text-anchor="middle" dominant-baseline="central">nenhum endereço para alcançar</text>
+      </g>
+
+      <!-- pulsos: por último, para ficarem acima de tudo -->
+      <circle id="pulse-e-usuario-dns" class="pulse" r="5" fill="var(--accent)"/>
+      <circle id="pulse-e-dns-app" class="pulse" r="5" fill="var(--accent)"/>
+      <circle id="pulse-e-app-o1" class="pulse" r="5" fill="var(--accent)"/>
+      <circle id="pulse-e-app-o2" class="pulse" r="5" fill="var(--accent)"/>
+      <circle id="pulse-e-api-backend" class="pulse" r="5" fill="var(--accent)"/>
+      <circle id="pulse-e-backend-d1" class="pulse" r="5" fill="var(--accent)"/>
+
+    </svg>
+  </div>
+
+  <div class="legend">
+    <div><span class="sw" style="background:var(--gray)"></span> Fora da Cloudflare</div>
+    <div><span class="sw" style="background:var(--blue)"></span> Borda: DNS e proxy reverso</div>
+    <div><span class="sw" style="background:var(--teal)"></span> Front-end redundante</div>
+    <div><span class="sw" style="background:var(--green)"></span> Zona privada</div>
+    <div><span class="swl" style="border-color:var(--text-dim)"></span> Tráfego pela Internet</div>
+    <div><span class="swl" style="border-color:var(--text-dim); border-top-style:dashed"></span> Ligação interna, sem rede</div>
+    <div><span class="swl" style="border-color:var(--coral); border-top-style:dashed"></span> Bloqueado</div>
+  </div>
+
+  <p class="hint">// tab através dos elementos também funciona</p>
+</div>
+
+<div class="backdrop" id="backdrop"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <button class="drawer-close" id="drawerClose" aria-label="Fechar explicação">×</button>
+  <div class="drawer-kind"><span class="drawer-dot" id="drawerDot"></span><span id="drawerKind"></span></div>
+  <h2 id="drawerTitle"></h2>
+  <div id="drawerBody"></div>
+  <div class="facts" id="drawerFacts"></div>
+</aside>
+
+<script>
+  const CONTENT = {
+    "usuario": {
+      kind:"Componente", color:"var(--gray)", title:"Usuário",
+      body:"O navegador de quem acessa o site. Daqui saem dois pedidos diferentes: primeiro o carregamento da página, e depois, já com o React rodando, as chamadas de API para ler e gravar tarefas.",
+      facts:{ "Acessa":"app.trabaidafacul.site", "Protocolo":"HTTPS (TLS 1.2+)", "Porta 80":"redirecionada com 301 para 443" }
+    },
+    "cloudflare": {
+      kind:"Fronteira", color:"var(--gray)", title:"Rede Cloudflare",
+      body:"Tudo daqui pra dentro roda na infraestrutura da Cloudflare, distribuída em centenas de pontos de presença. Não existe máquina virtual, sistema operacional para atualizar nem porta de administração aberta em nenhuma das camadas.",
+      facts:{ "Modelo":"serverless", "Servidores para administrar":"nenhum", "Custo":"plano gratuito" }
+    },
+    "dns": {
+      kind:"Componente", color:"var(--blue)", title:"DNS Cloudflare",
+      body:"Zona autoritativa do domínio. Traduz app.trabaidafacul.site e api.trabaidafacul.site para a borda da Cloudflare. Os dois registros foram criados como Custom Domains do Worker, então a Cloudflare também emitiu o certificado TLS de cada um automaticamente.",
+      facts:{ "Domínio":"trabaidafacul.site", "Registros":"app e api, ambos proxied", "Porta":"53/UDP", "Certificado":"emitido no deploy" }
+    },
+    "proxy": {
+      kind:"Componente", color:"var(--blue)", title:"Proxy reverso",
+      body:"Um único Cloudflare Worker que atende os dois hostnames e decide o que fazer olhando o hostname da requisição. É o único ponto da arquitetura exposto à Internet — nada passa por fora dele.",
+      facts:{ "Serviço":"Cloudflare Workers", "Hostnames":"app e api", "Código":"~150 linhas", "URL workers.dev":"desativada" }
+    },
+    "rota-app": {
+      kind:"Rota", color:"var(--blue)", title:"app.trabaidafacul.site",
+      body:"Encaminha a requisição para uma das duas origens do front-end. A origem é escolhida pelo hash do IP do visitante — o mesmo visitante cai sempre na mesma, e visitantes diferentes se distribuem entre as duas. É a mesma técnica do ip_hash do nginx e do sticky session do AWS ALB.",
+      facts:{ "Distribuição":"afinidade por IP", "Timeout":"5 segundos", "Troca de origem":"timeout, erro 5xx, falha de DNS ou redirect", "Cabeçalhos":"X-Served-By e X-Failover" }
+    },
+    "rota-api": {
+      kind:"Rota", color:"var(--blue)", title:"api.trabaidafacul.site",
+      body:"Aplica três verificações antes de encaminhar qualquer coisa ao back-end. O que não passa nas três nunca chega lá. Requisições sem cabeçalho Origin, como as de curl, seguem permitidas — são elas que comprovam o acesso à API pelo domínio.",
+      facts:{ "Origin aceita":"só https://app.trabaidafacul.site", "Métodos":"GET, POST, PATCH, DELETE, OPTIONS", "Rotas":"/todos, /todos/{id}, /health", "Rate limit":"100 req/min por IP", "Recusa":"403 ou 405" }
+    },
+    "origem1": {
+      kind:"Componente", color:"var(--teal)", title:"Origem 1 · Cloudflare Pages",
+      body:"Primeira cópia do front-end: o build de produção do React, arquivos estáticos servidos pela borda. Não roda servidor nenhum. É um dos dois pontos de execução que atendem o requisito de redundância.",
+      facts:{ "Serviço":"Cloudflare Pages", "Projeto":"trabaidafacul", "Conteúdo":"build do React", "Porta":"443/TCP" }
+    },
+    "origem2": {
+      kind:"Componente", color:"var(--teal)", title:"Origem 2 · Cloudflare Pages",
+      body:"Segunda cópia, num projeto totalmente independente: outro deployment, outro ciclo de vida. Se a primeira quebrar, o proxy passa a atender por aqui sem que o usuário perceba. Foi o que o teste de failover comprovou.",
+      facts:{ "Serviço":"Cloudflare Pages", "Projeto":"trabaidafacul-b", "Papel":"reserva ativa", "Limitação":"mesmo provedor da origem 1" }
+    },
+    "zona-privada": {
+      kind:"Fronteira", color:"var(--green)", title:"Zona privada",
+      body:"Daqui pra dentro não existe endereço roteável na Internet. Não é uma regra de firewall que pode ser desligada por engano: simplesmente não há caminho de rede. É a camada mais forte da arquitetura e a mais simples de defender.",
+      facts:{ "Entrada possível":"só por binding, de dentro da Cloudflare", "Hostname público":"nenhum", "Portas abertas":"nenhuma" }
+    },
+    "backend": {
+      kind:"Componente", color:"var(--green)", title:"Back-end · Worker",
+      body:"A API de tarefas: as quatro rotas do projeto original, reescritas de Express e Mongoose para Worker e SQL. Foi publicado com workers_dev = false e sem nenhuma rota de DNS, então não existe URL capaz de alcançá-lo. Só o proxy consegue invocá-lo.",
+      facts:{ "Rotas":"GET, POST, PATCH e DELETE /todos", "URL pública":"não existe", "Invocação":"service binding, vindo do proxy", "Validação":"campo obrigatório e prepared statements" }
+    },
+    "d1": {
+      kind:"Componente", color:"var(--green)", title:"Banco · D1",
+      body:"SQLite serverless da Cloudflare. Foi a escolha central do projeto: nenhum banco gerenciado gratuito de Mongo ou Postgres permite fechar o acesso público no plano free — todos ficam com endpoint na Internet protegido só por senha. O D1 não expõe socket de rede nenhum.",
+      facts:{ "Serviço":"Cloudflare D1", "Acesso":"binding declarado no Worker", "Host":"não existe", "String de conexão":"não existe", "Credencial":"nenhuma para vazar" }
+    },
+    "internet": {
+      kind:"Origem externa", color:"var(--gray)", title:"Internet",
+      body:"Qualquer pessoa de fora tentando alcançar o back-end ou o banco diretamente: um curl no endereço do Worker, um cliente de banco apontando para o domínio, um scanner de portas.",
+      facts:{ "Tentativas testadas":"curl, nslookup, Test-NetConnection", "Resultado":"NXDOMAIN e timeout" }
+    },
+    "alvo-bloqueado": {
+      kind:"Alvo inalcançável", color:"var(--coral)", title:"Back-end e Banco",
+      body:"Não há o que atacar. O back-end não tem hostname para o DNS resolver, e o banco não tem porta para conectar. A diferença entre isso e um firewall importa: firewall depende de uma configuração continuar correta com o tempo, e aqui não existe caminho para interromper.",
+      facts:{ "Back-end":"sem URL pública", "Banco":"sem endpoint de rede", "3306 · 5432 · 27017":"sem resposta" }
+    },
+
+    "e-usuario-dns": {
+      kind:"Fluxo permitido", color:"var(--accent)", title:"Usuário → DNS",
+      body:"O navegador pergunta ao DNS da Cloudflare para onde vai app.trabaidafacul.site. A resposta aponta para a borda da Cloudflare, nunca para o endereço real de uma origem.",
+      facts:{ "Porta":"53/UDP", "Resposta":"borda anycast da Cloudflare" }
+    },
+    "e-dns-app": {
+      kind:"Fluxo permitido", color:"var(--accent)", title:"Usuário → Proxy reverso",
+      body:"Com o endereço em mãos, o navegador abre a conexão HTTPS com o proxy. Todo acesso externo do projeto entra por aqui. Uma tentativa na porta 80 recebe um 301 para a 443 antes de qualquer outra coisa.",
+      facts:{ "Porta":"443/TCP", "Protocolo":"HTTPS, TLS 1.2 no mínimo", "HSTS":"12 meses" }
+    },
+    "e-app-o1": {
+      kind:"Fluxo permitido", color:"var(--accent)", title:"Proxy → Origem 1",
+      body:"O proxy busca a página na origem escolhida para aquele visitante e devolve o conteúdo. O navegador nunca fica sabendo qual origem respondeu — só vê o domínio oficial.",
+      facts:{ "Porta":"443/TCP", "Escolha":"hash do IP do visitante", "Cabeçalho de rastreio":"X-Served-By" }
+    },
+    "e-app-o2": {
+      kind:"Fluxo permitido", color:"var(--accent)", title:"Proxy → Origem 2 (failover)",
+      body:"Se a origem preferida falhar, o proxy tenta a outra dentro da mesma requisição. O usuário não vê erro e não precisa recarregar. Só se as duas falharem é que ele recebe um 503.",
+      facts:{ "Dispara em":"timeout, 5xx, falha de DNS ou redirect", "Tempo limite":"5 segundos", "Cabeçalho":"X-Failover: sim" }
+    },
+    "e-front-api": {
+      kind:"Fluxo permitido", color:"var(--accent)", title:"Front-end → API",
+      body:"Depois que a página carregou, cada ação do usuário dispara uma chamada separada para api.trabaidafacul.site. É um pedido independente do carregamento do site, e passa pelo mesmo proxy — só que pela outra rota, a que tem as regras de acesso.",
+      facts:{ "Porta":"443/TCP", "Origin enviada":"https://app.trabaidafacul.site", "Outras origens":"recebem 403" }
+    },
+    "e-api-backend": {
+      kind:"Ligação interna", color:"var(--accent)", title:"Proxy → Back-end",
+      body:"Service binding: uma invocação de Worker para Worker resolvida dentro do runtime da Cloudflare. Não abre socket, não usa DNS, não passa pela Internet e não pode partir de fora. É por causa dela que o back-end consegue existir sem endereço público e mesmo assim ser alcançado.",
+      facts:{ "Porta":"nenhuma", "Rede":"não usa", "Pode partir de fora":"não", "Cabeçalho de prova":"X-Upstream: service-binding" }
+    },
+    "e-backend-d1": {
+      kind:"Ligação interna", color:"var(--accent)", title:"Back-end → Banco",
+      body:"O acesso ao D1 é feito por um binding declarado no wrangler.toml e usado no código como env.DB. Não existe host, porta nem credencial: a autorização vem da plataforma para aquele Worker específico. É o único caminho que existe até os dados.",
+      facts:{ "Porta":"nenhuma", "Credencial":"nenhuma", "Declaração":"binding = \"DB\"", "Queries":"prepared statements" }
+    },
+    "e-bloqueado": {
+      kind:"Fluxo bloqueado", color:"var(--coral)", title:"Internet → Back-end e Banco",
+      body:"Este é o acesso que o enunciado pede para demonstrar bloqueado — e aqui ele não é bloqueado, é impossível. Não há regra a burlar porque não há rota a percorrer: o DNS não resolve nome nenhum para o back-end, e nenhuma porta de banco responde no domínio.",
+      facts:{ "nslookup do banco":"NXDOMAIN", "curl no workers.dev":"host não existe", "3306 · 5432 · 27017":"TcpTestSucceeded: False" }
+    }
+  };
+
+  const drawer = document.getElementById('drawer');
+  const backdrop = document.getElementById('backdrop');
+  const drawerKind = document.getElementById('drawerKind');
+  const drawerDot = document.getElementById('drawerDot');
+  const drawerTitle = document.getElementById('drawerTitle');
+  const drawerBody = document.getElementById('drawerBody');
+  const drawerFacts = document.getElementById('drawerFacts');
+
+  function openDrawer(id){
+    const c = CONTENT[id];
+    if(!c) return;
+    drawerKind.textContent = c.kind;
+    drawerDot.style.background = c.color;
+    drawerTitle.textContent = c.title;
+    drawerTitle.style.color = c.color;
+
+    drawerBody.innerHTML = '';
+    const p = document.createElement('p');
+    p.textContent = c.body;
+    drawerBody.appendChild(p);
+
+    drawerFacts.innerHTML = '';
+    if(c.facts){
+      for(const [k, v] of Object.entries(c.facts)){
+        const row = document.createElement('div');
+        const b = document.createElement('b');
+        b.textContent = k + ': ';
+        row.appendChild(b);
+        row.appendChild(document.createTextNode(v));
+        drawerFacts.appendChild(row);
+      }
+    }
+
+    drawer.classList.add('open');
+    drawer.setAttribute('aria-hidden','false');
+    backdrop.classList.add('open');
+
+    if(id.startsWith('e-')){
+      const dot = document.getElementById('pulse-' + id);
+      const line = document.querySelector('.edge[data-id="'+id+'"] .line');
+      if(dot && line && line.tagName.toLowerCase() === 'line'){
+        const x1 = line.getAttribute('x1'), y1 = line.getAttribute('y1');
+        const x2 = line.getAttribute('x2'), y2 = line.getAttribute('y2');
+        dot.setAttribute('cx', x1); dot.setAttribute('cy', y1);
+        dot.style.transition = 'none';
+        dot.style.opacity = 1;
+        requestAnimationFrame(() => {
+          dot.style.transition = 'cx .8s ease, cy .8s ease, opacity .8s ease .5s';
+          dot.setAttribute('cx', x2); dot.setAttribute('cy', y2);
+          setTimeout(() => { dot.style.opacity = 0; }, 800);
+        });
+      }
+    }
+  }
+
+  function closeDrawer(){
+    drawer.classList.remove('open');
+    drawer.setAttribute('aria-hidden','true');
+    backdrop.classList.remove('open');
+  }
+
+  document.querySelectorAll('.node, .edge').forEach(el => {
+    el.addEventListener('click', () => openDrawer(el.dataset.id));
+    el.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openDrawer(el.dataset.id); }
+    });
+    el.addEventListener('focus', () => el.classList.add('kbd-focus'));
+    el.addEventListener('blur', () => el.classList.remove('kbd-focus'));
+  });
+
+  document.getElementById('drawerClose').addEventListener('click', closeDrawer);
+  backdrop.addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (e) => { if(e.key === 'Escape') closeDrawer(); });
+</script>
+
+</body>
+</html>

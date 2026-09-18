@@ -10,17 +10,17 @@ compatibility_date = "2026-09-07"
 # ---------------------------------------------------------------------------
 workers_dev = false
 
+# Observabilidade (entrega 2): mesmo destino de logs do proxy.
+# Usuario e token entram por wrangler secret, nunca aqui.
+[vars]
+LOKI_URL = "https://logs-prod-024.grafana.net/loki/api/v1/push"
+
 # Banco de dados serverless. O acesso e por binding, nao por rede:
 # o D1 nao possui host, porta nem string de conexao publica.
 [[d1_databases]]
 binding = "DB"
 database_name = "trabaidafacul-db"
-database_id = "COLE_AQUI_O_DATABASE_ID"   # sai do comando: wrangler d1 create
-
-# Observabilidade (entrega 2): mesmo destino de logs do proxy.
-#   wrangler secret put LOKI_USER
-#   wrangler secret put LOKI_TOKEN
-# LOKI_URL = "https://logs-prod-XXX.grafana.net/loki/api/v1/push"
+database_id = "7f777743-c57d-4ad5-80c8-19adbf8befab"
 
 [observability]
 enabled = true

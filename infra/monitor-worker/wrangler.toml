@@ -12,9 +12,10 @@ crons = ["* * * * *"]
 [vars]
 ALVO_FRONT = "https://app.trabaidafacul.site/"
 ALVO_API = "https://api.trabaidafacul.site/health"
-# LOKI_URL entra como var; LOKI_USER e LOKI_TOKEN entram como secret:
+# LOKI_USER e LOKI_TOKEN entram como secret, nunca aqui:
 #   wrangler secret put LOKI_USER
 #   wrangler secret put LOKI_TOKEN
+LOKI_URL = "https://logs-prod-024.grafana.net/loki/api/v1/push"
 
 [observability]
 enabled = true

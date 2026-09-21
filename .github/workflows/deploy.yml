@@ -1,0 +1,147 @@
+# -----------------------------------------------------------------------------
+# Integracao e entrega continua
+#
+# Dispara a cada push na branch main. A ordem importa: os testes rodam primeiro
+# e, se qualquer um falhar, nada e publicado. So depois de passarem e que o
+# front-end e os Workers vao para a Cloudflare.
+#
+# Credenciais ficam nos Secrets do repositorio, nunca no codigo:
+#   CLOUDFLARE_API_TOKEN   token com permissao de editar Workers, Pages e D1
+#   CLOUDFLARE_ACCOUNT_ID  identificador da conta
+#
+# Os segredos ja configurados nos Workers (LOKI_USER e LOKI_TOKEN) permanecem
+# guardados na Cloudflare e nao sao afetados pelos deploys.
+# -----------------------------------------------------------------------------
+
+name: Testes e deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:      # permite disparar manualmente pela aba Actions
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # 1. Portao de qualidade: 35 verificacoes contra um SQLite em memoria.
+  #    Nenhum deploy acontece se este job falhar.
+  # ---------------------------------------------------------------------------
+  testes:
+    name: Testes automatizados
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Preparar o Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Rodar os testes
+        working-directory: infra
+        run: node --experimental-sqlite teste-local.mjs
+
+  # ---------------------------------------------------------------------------
+  # 2. Front-end: build unico, publicado nas DUAS origens.
+  #    Publicar o mesmo artefato nos dois projetos garante que as origens nunca
+  #    fiquem em versoes diferentes — o que quebraria o failover.
+  # ---------------------------------------------------------------------------
+  front:
+    name: Build e publicacao do front-end
+    needs: testes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Preparar o Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: frontend
+        run: npm ci
+
+      - name: Gerar o build de producao
+        working-directory: frontend
+        env:
+          CI: false      # avisos do build nao derrubam a esteira
+        run: npm run build
+
+      - name: Publicar na origem 1
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: frontend
+          command: pages deploy build --project-name=trabaidafacul --branch=main
+
+      - name: Publicar na origem 2
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: frontend
+          command: pages deploy build --project-name=trabaidafacul-b --branch=main
+
+  # ---------------------------------------------------------------------------
+  # 3. Workers, na ordem correta.
+  #    O back-end sobe antes do proxy porque o proxy depende dele pelo
+  #    service binding. O monitor vai por ultimo.
+  # ---------------------------------------------------------------------------
+  workers:
+    name: Publicacao dos Workers
+    needs: testes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Publicar o back-end
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: infra/api-worker
+          command: deploy
+
+      - name: Publicar o proxy reverso
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: infra/proxy-worker
+          command: deploy
+
+      - name: Publicar o monitor de disponibilidade
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: infra/monitor-worker
+          command: deploy
+
+  # ---------------------------------------------------------------------------
+  # 4. Verificacao pos-deploy: confirma que o ambiente responde pelo dominio
+  #    depois de tudo publicado.
+  # ---------------------------------------------------------------------------
+  verificacao:
+    name: Verificacao pos-deploy
+    needs: [front, workers]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Front-end responde pelo dominio
+        run: |
+          codigo=$(curl -s -o /dev/null -w "%{http_code}" https://app.trabaidafacul.site/)
+          echo "app.trabaidafacul.site respondeu $codigo"
+          test "$codigo" = "200"
+
+      - name: API responde e alcanca o banco
+        run: |
+          resposta=$(curl -s https://api.trabaidafacul.site/health)
+          echo "$resposta"
+          echo "$resposta" | grep -q '"status":"ok"'
